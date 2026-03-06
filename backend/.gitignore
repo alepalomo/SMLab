@@ -3,3 +3,5 @@ node_modules/
 *.db
 src/assets/header_spectrummedia.png
 src/assets/firma.png
+node_modules/
+.env
