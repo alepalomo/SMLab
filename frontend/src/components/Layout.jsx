@@ -4,7 +4,6 @@ import useAuthStore from '../features/auth/authStore';
 const NAV = [
   { to: '/cotizador',    label: 'Cotizador',        icon: '📝', roles: ['ADMIN','AUTORIZADO','VENDEDOR'] },
   { to: '/aprobaciones', label: 'Aprobaciones',     icon: '✅', roles: ['ADMIN','AUTORIZADO'] },
-  { to: '/ejecucion',    label: 'Ejecución',         icon: '🚀', roles: ['ADMIN','AUTORIZADO'] },
   { to: '/gastos',       label: 'Gastos Reales',    icon: '💸', roles: ['ADMIN','AUTORIZADO','VENDEDOR'] },
   { to: '/dashboard',    label: 'Dashboard',        icon: '📊', roles: ['ADMIN','AUTORIZADO','VENDEDOR'] },
   { to: '/catalogos',    label: 'Catálogos',        icon: '⚙️', roles: ['ADMIN','AUTORIZADO'] },

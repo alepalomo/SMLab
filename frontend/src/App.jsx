@@ -5,7 +5,6 @@ import Layout from './components/Layout';
 import LoginPage from './features/auth/LoginPage';
 import CotizadorPage from './features/cotizador/CotizadorPage';
 import AprobacionesPage from './features/aprobaciones/AprobacionesPage';
-import EjecucionPage from './features/ejecucion/EjecucionPage';
 import GastosPage from './features/gastos/GastosPage';
 import DashboardPage from './features/dashboard/DashboardPage';
 import CatalogosPage from './features/catalogos/CatalogosPage';
@@ -40,11 +39,6 @@ export default function App() {
       <Route path="/aprobaciones" element={
         <PrivateRoute roles={['ADMIN','AUTORIZADO']}>
           <AprobacionesPage />
-        </PrivateRoute>
-      } />
-      <Route path="/ejecucion" element={
-        <PrivateRoute roles={['ADMIN','AUTORIZADO']}>
-          <EjecucionPage />
         </PrivateRoute>
       } />
       <Route path="/gastos" element={
