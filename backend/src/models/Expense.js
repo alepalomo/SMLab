@@ -18,6 +18,7 @@ const Expense = sequelize.define('Expense', {
   hostDetails: { type: DataTypes.JSONB, allowNull: true }, // [{desc, rate, days}]
   companyId: { type: DataTypes.INTEGER, allowNull: true },
   payTo: { type: DataTypes.STRING, allowNull: true },
+  receiptImagePath: { type: DataTypes.STRING, allowNull: true },
 }, { tableName: 'expenses' });
 
 module.exports = Expense;

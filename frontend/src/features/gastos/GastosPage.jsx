@@ -29,6 +29,8 @@ export default function GastosPage() {
   // Forms
   const [odcForm, setOdcForm] = useState({ odcNumber: '', date: today(), oiId: '', companyId: '', amountGtq: '', description: '', quoteId: '' });
   const [ccForm, setCcForm] = useState({ date: today(), oiId: '', companyId: '', amountGtq: '', docNumber: '', textAdditional: '', payTo: '', quoteId: '' });
+  const [ccReceiptFile, setCcReceiptFile] = useState(null);
+  const ccReceiptRef = { current: null };
 
   // HOST
   const [hostProv, setHostProv] = useState('');
@@ -83,9 +85,15 @@ export default function GastosPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      await api.post('/expenses/caja-chica', { ...ccForm, amountGtq: Number(ccForm.amountGtq) });
+      const { data: expense } = await api.post('/expenses/caja-chica', { ...ccForm, amountGtq: Number(ccForm.amountGtq) });
+      if (ccReceiptFile) {
+        const fd = new FormData();
+        fd.append('image', ccReceiptFile);
+        await api.post(`/expenses/${expense.id}/receipt`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      }
       toast.success('Caja Chica guardada');
       setCcForm(f => ({ ...f, amountGtq: '', docNumber: '', textAdditional: '', payTo: '' }));
+      setCcReceiptFile(null);
     } catch (err) { toast.error(getApiError(err)); }
     finally { setLoading(false); }
   };
@@ -166,14 +174,24 @@ export default function GastosPage() {
     finally { setLoading(false); }
   };
 
-  const downloadReport = async (type) => {
+  const downloadReport = async (type, format = 'csv') => {
     try {
-      const endpoint = type === 'odc' ? '/expenses/report/odc' : '/expenses/report/caja-chica';
+      let endpoint, filename;
+      if (type === 'odc') {
+        endpoint = '/expenses/report/odc';
+        filename = 'reporte_odc.csv';
+      } else if (format === 'pdf') {
+        endpoint = '/expenses/report/caja-chica-pdf';
+        filename = `facturas_caja_chica_${rango.from}_${rango.to}.pdf`;
+      } else {
+        endpoint = '/expenses/report/caja-chica';
+        filename = 'caja_chica_contable.csv';
+      }
       const res = await api.get(`${endpoint}?from=${rango.from}&to=${rango.to}`, { responseType: 'blob' });
       const url = URL.createObjectURL(res.data);
       const link = document.createElement('a');
       link.href = url;
-      link.download = type === 'odc' ? 'reporte_odc.csv' : 'caja_chica_contable.csv';
+      link.download = filename;
       link.click();
       URL.revokeObjectURL(url);
     } catch (err) { toast.error(getApiError(err)); }
@@ -312,6 +330,22 @@ export default function GastosPage() {
                   <label className="label">Texto Adicional</label>
                   <input className="input" value={ccForm.textAdditional} onChange={e => setCcForm(f => ({ ...f, textAdditional: e.target.value }))} />
                 </div>
+                <div className="col-span-3">
+                  <label className="label">📎 Imagen de Factura (opcional)</label>
+                  {ccReceiptFile ? (
+                    <div className="flex items-center gap-3 mt-1">
+                      <img src={URL.createObjectURL(ccReceiptFile)} alt="Factura" className="h-16 w-16 object-cover rounded border border-gray-200" />
+                      <span className="text-sm text-gray-600">{ccReceiptFile.name}</span>
+                      <button type="button" className="text-red-500 text-xs hover:text-red-700" onClick={() => setCcReceiptFile(null)}>× Quitar</button>
+                    </div>
+                  ) : (
+                    <label className="flex items-center gap-2 border border-dashed border-gray-300 rounded-lg p-3 cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition-colors mt-1 w-fit">
+                      <span className="text-lg">🧾</span>
+                      <span className="text-sm text-gray-500">Adjuntar factura (JPG, PNG, WEBP)</span>
+                      <input type="file" accept="image/*" className="hidden" onChange={e => setCcReceiptFile(e.target.files?.[0] || null)} />
+                    </label>
+                  )}
+                </div>
               </div>
               <div className="flex justify-end">
                 <button type="submit" className="btn-primary" disabled={loading}>💾 Guardar Caja Chica</button>
@@ -319,7 +353,7 @@ export default function GastosPage() {
             </form>
           </div>
 
-          <ReportDownloader rango={rango} setRango={setRango} onDownload={() => downloadReport('caja')} label="Reporte Contable Caja Chica" />
+          <ReportDownloader rango={rango} setRango={setRango} onDownload={() => downloadReport('caja')} onDownloadPdf={() => downloadReport('caja', 'pdf')} label="Reporte Contable Caja Chica" />
         </div>
       )}
 
@@ -528,7 +562,7 @@ export default function GastosPage() {
   );
 }
 
-function ReportDownloader({ rango, setRango, onDownload, label }) {
+function ReportDownloader({ rango, setRango, onDownload, onDownloadPdf, label }) {
   return (
     <div className="card p-5">
       <h3 className="font-medium text-gray-700 mb-3">⬇️ {label}</h3>
@@ -542,6 +576,9 @@ function ReportDownloader({ rango, setRango, onDownload, label }) {
           <input type="date" className="input" value={rango.to} onChange={e => setRango(r => ({ ...r, to: e.target.value }))} />
         </div>
         <button className="btn-secondary" onClick={onDownload}>Descargar CSV</button>
+        {onDownloadPdf && (
+          <button className="btn-secondary" onClick={onDownloadPdf}>📄 Descargar PDF de Facturas</button>
+        )}
       </div>
     </div>
   );

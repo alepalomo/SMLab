@@ -1,6 +1,31 @@
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const PDFDocument = require('pdfkit');
 const { Expense, Quote, OI, Mall, Proveedor } = require('../models');
 const { getActiveRate } = require('../services/exchangeService');
 const { generateHostZip } = require('../services/pdfService');
+
+// ── Multer para facturas de Caja Chica ───────────────────────────────────────
+const RECEIPTS_DIR = path.join(__dirname, '../assets/receipts');
+if (!fs.existsSync(RECEIPTS_DIR)) fs.mkdirSync(RECEIPTS_DIR, { recursive: true });
+
+const receiptStorage = multer.diskStorage({
+  destination: RECEIPTS_DIR,
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `receipt_${req.params.id}_${Date.now()}${ext}`);
+  },
+});
+const receiptUpload = multer({
+  storage: receiptStorage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_, file, cb) => {
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+    cb(null, allowed.includes(path.extname(file.originalname).toLowerCase()));
+  },
+});
+exports.receiptUpload = receiptUpload;
 
 // POST /api/expenses/odc
 exports.createOdc = async (req, res, next) => {
@@ -255,5 +280,118 @@ exports.reportCajaChica = async (req, res, next) => {
 
     res.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="caja_chica_contable.csv"' });
     res.send(header + rows);
+  } catch (err) { next(err); }
+};
+
+// POST /api/expenses/:id/receipt — subir imagen de factura
+exports.uploadReceipt = async (req, res, next) => {
+  try {
+    const expense = await Expense.findByPk(req.params.id);
+    if (!expense) return res.status(404).json({ error: 'Gasto no encontrado.' });
+    if (!req.file) return res.status(400).json({ error: 'Imagen requerida.' });
+
+    if (expense.receiptImagePath) {
+      const oldPath = path.join(RECEIPTS_DIR, expense.receiptImagePath);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    }
+
+    await expense.update({ receiptImagePath: req.file.filename });
+    res.json({ receiptImagePath: req.file.filename });
+  } catch (err) { next(err); }
+};
+
+// DELETE /api/expenses/:id/receipt — eliminar imagen de factura
+exports.deleteReceipt = async (req, res, next) => {
+  try {
+    const expense = await Expense.findByPk(req.params.id);
+    if (!expense) return res.status(404).json({ error: 'Gasto no encontrado.' });
+
+    if (expense.receiptImagePath) {
+      const filePath = path.join(RECEIPTS_DIR, expense.receiptImagePath);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      await expense.update({ receiptImagePath: null });
+    }
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+};
+
+// GET /api/expenses/report/caja-chica-pdf?from=&to= — PDF con todas las facturas
+exports.reportCajaChicaPdf = async (req, res, next) => {
+  try {
+    const { Op } = require('sequelize');
+    const { from, to } = req.query;
+    const where = { category: 'CAJA_CHICA' };
+    if (from && to) where.date = { [Op.between]: [from, to] };
+
+    const data = await Expense.findAll({
+      where,
+      include: [
+        { model: OI, as: 'oi' },
+        { model: Proveedor, as: 'company' },
+        { model: Quote, as: 'quote' },
+      ],
+      order: [['date', 'ASC']],
+    });
+
+    const doc = new PDFDocument({ autoFirstPage: false, margin: 40 });
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+
+    for (const e of data) {
+      doc.addPage();
+
+      // Encabezado
+      doc.fontSize(14).font('Helvetica-Bold').text('Factura de Caja Chica', { align: 'center' });
+      doc.moveDown(0.5);
+      doc.fontSize(10).font('Helvetica');
+
+      const info = [
+        ['Fecha', e.date],
+        ['# Factura', e.docNumber || '—'],
+        ['Proveedor', e.company?.name || '—'],
+        ['NIT', e.company?.nit || '—'],
+        ['OI', e.oi?.oiCode ? `${e.oi.oiCode} — ${e.oi.oiName}` : '—'],
+        ['Actividad', e.quote?.activityName || '—'],
+        ['Monto', `Q ${Number(e.amountGtq).toFixed(2)}`],
+        ['Pagar a', e.payTo || '—'],
+        ['Texto adicional', e.textAdditional || '—'],
+      ];
+
+      info.forEach(([label, value]) => {
+        doc.font('Helvetica-Bold').text(`${label}: `, { continued: true });
+        doc.font('Helvetica').text(String(value));
+      });
+
+      // Imagen de factura
+      if (e.receiptImagePath) {
+        const imgPath = path.join(RECEIPTS_DIR, e.receiptImagePath);
+        if (fs.existsSync(imgPath)) {
+          doc.moveDown(1);
+          const pageW = doc.page.width - 80;
+          const maxH = doc.page.height - doc.y - 60;
+          doc.image(imgPath, { fit: [pageW, maxH], align: 'center' });
+        }
+      } else {
+        doc.moveDown(1);
+        doc.fillColor('#aaaaaa').fontSize(9).text('(Sin imagen de factura adjunta)', { align: 'center' });
+        doc.fillColor('#000000');
+      }
+    }
+
+    if (data.length === 0) {
+      doc.addPage();
+      doc.fontSize(12).text('No hay registros de Caja Chica en el período seleccionado.', { align: 'center' });
+    }
+
+    doc.end();
+
+    await new Promise(resolve => doc.on('end', resolve));
+    const pdfBuffer = Buffer.concat(chunks);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="facturas_caja_chica_${from}_${to}.pdf"`,
+    });
+    res.send(pdfBuffer);
   } catch (err) { next(err); }
 };

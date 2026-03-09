@@ -11,6 +11,7 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({ origin: process.env.FRONTEND_URL || '*', credentials: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use('/renders', express.static(path.join(__dirname, 'assets/renders')));
+app.use('/receipts', express.static(path.join(__dirname, 'assets/receipts')));
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/quotes', require('./routes/quotes'));
 app.use('/api/expenses', require('./routes/expenses'));
