@@ -82,30 +82,41 @@ function RenderPanel({ quoteId, renderImagePath, onUpdated }) {
   );
 }
 
+const fmtMonth = m => {
+  const [y, mo] = m.split('-');
+  return ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][parseInt(mo) - 1] + ' ' + y;
+};
+
 export default function AprobacionesPage() {
   const [tab, setTab] = useState('pending');
   const [pending, setPending] = useState([]);
   const [active, setActive] = useState([]);
   const [closed, setClosed] = useState([]);
   const [insumos, setInsumos] = useState([]);
-  const [prices, setPrices] = useState({});      // { [quoteId]: finalPrice }
-  const [addForms, setAddForms] = useState({});  // { [quoteId]: { insumoId, qtyPersonas, unitsValue } }
-  const [renders, setRenders] = useState({});    // { [quoteId]: renderImagePath }
+  const [malls, setMalls] = useState([]);
+  const [prices, setPrices] = useState({});           // { [quoteId]: finalPrice }
+  const [addForms, setAddForms] = useState({});       // { [quoteId]: { insumoId, qtyPersonas, unitsValue } }
+  const [renders, setRenders] = useState({});         // { [quoteId]: renderImagePath }
+  const [billingMaps, setBillingMaps] = useState({}); // { [quoteId]: { 'YYYY-MM': { mallIdStr: amount } } }
+  const [newMonths, setNewMonths] = useState({});     // { [quoteId]: '' }
+  const [savingBillings, setSavingBillings] = useState({});
   const [loading, setLoading] = useState(false);
 
   const updateRender = (quoteId, path) => setRenders(prev => ({ ...prev, [quoteId]: path }));
 
   const load = async () => {
-    const [pend, act, cl, ins] = await Promise.all([
+    const [pend, act, cl, ins, mallList] = await Promise.all([
       api.get('/quotes?status=ENVIADA'),
       api.get('/quotes?status=APROBADA'),
       api.get('/quotes?status=LIQUIDADA'),
       api.get('/catalogs/insumos?active=true'),
+      api.get('/catalogs/malls'),
     ]);
     setPending(pend.data);
     setActive(act.data);
     setClosed(cl.data);
     setInsumos(ins.data);
+    setMalls(mallList.data);
     // Inicializar precios sugeridos
     const p = {};
     [...pend.data, ...act.data].forEach(q => {
@@ -120,6 +131,43 @@ export default function AprobacionesPage() {
     const r = {};
     [...pend.data, ...act.data].forEach(q => { r[q.id] = q.renderImagePath ?? null; });
     setRenders(r);
+    // Inicializar billing maps
+    const bm = {};
+    const nm = {};
+    [...pend.data, ...act.data].forEach(q => {
+      const map = {};
+      for (const { month, mallId, amount } of (q.billingSchedule || [])) {
+        if (!map[month]) map[month] = {};
+        map[month][String(mallId ?? '_')] = amount;
+      }
+      bm[q.id] = map;
+      nm[q.id] = '';
+    });
+    setBillingMaps(bm);
+    setNewMonths(nm);
+  };
+
+  const addBillingMonth = (q, month) => {
+    if (!month || billingMaps[q.id]?.[month]) return;
+    const keys = q.mallIds?.length > 0 ? q.mallIds.map(String) : ['_'];
+    setBillingMaps(bm => ({ ...bm, [q.id]: { ...bm[q.id], [month]: Object.fromEntries(keys.map(k => [k, 0])) } }));
+    setNewMonths(nm => ({ ...nm, [q.id]: '' }));
+  };
+
+  const saveBilling = async (q) => {
+    setSavingBillings(sb => ({ ...sb, [q.id]: true }));
+    try {
+      const flat = Object.entries(billingMaps[q.id] || {}).flatMap(([month, entries]) =>
+        Object.entries(entries).map(([mid, amount]) => ({
+          month,
+          mallId: mid === '_' ? null : Number(mid),
+          amount: Number(amount) || 0,
+        }))
+      );
+      await api.put(`/quotes/${q.id}/billing`, { billingSchedule: flat });
+      toast.success('Facturación guardada');
+    } catch (err) { toast.error(getApiError(err)); }
+    finally { setSavingBillings(sb => ({ ...sb, [q.id]: false })); }
   };
 
   useEffect(() => { load(); }, []);
@@ -272,6 +320,19 @@ export default function AprobacionesPage() {
                   {/* Render */}
                   <RenderPanel quoteId={q.id} renderImagePath={renders[q.id]} onUpdated={updateRender} />
 
+                  {/* Facturación Mensual */}
+                  <BillingPanel
+                    q={q}
+                    malls={malls}
+                    billingMaps={billingMaps}
+                    newMonths={newMonths}
+                    savingBillings={savingBillings}
+                    setBillingMaps={setBillingMaps}
+                    setNewMonths={setNewMonths}
+                    addBillingMonth={addBillingMonth}
+                    saveBilling={saveBilling}
+                  />
+
                   {/* Precio de venta */}
                   <div className="grid grid-cols-2 gap-6">
                     <div className="space-y-2">
@@ -319,6 +380,17 @@ export default function AprobacionesPage() {
               </summary>
               <div className="border-t border-gray-100 px-5 py-4 space-y-4">
                 <RenderPanel quoteId={q.id} renderImagePath={renders[q.id]} onUpdated={updateRender} />
+                <BillingPanel
+                  q={q}
+                  malls={malls}
+                  billingMaps={billingMaps}
+                  newMonths={newMonths}
+                  savingBillings={savingBillings}
+                  setBillingMaps={setBillingMaps}
+                  setNewMonths={setNewMonths}
+                  addBillingMonth={addBillingMonth}
+                  saveBilling={saveBilling}
+                />
                 <div className="flex justify-end gap-3">
                   <button className="btn-secondary text-sm" onClick={() => liquidate(q)} disabled={loading}>🏁 Liquidar actividad</button>
                 </div>
@@ -369,6 +441,87 @@ function EmptyState({ msg }) {
     <div className="card p-10 text-center text-gray-400">
       <p className="text-3xl mb-2">✅</p>
       <p>{msg}</p>
+    </div>
+  );
+}
+
+function BillingPanel({ q, malls, billingMaps, newMonths, savingBillings, setBillingMaps, setNewMonths, addBillingMonth, saveBilling }) {
+  const map = billingMaps[q.id] || {};
+  const months = Object.keys(map).sort();
+
+  return (
+    <div className="border border-gray-100 rounded-lg p-3 bg-gray-50">
+      <p className="text-xs font-semibold text-gray-500 mb-3">📅 Facturación Mensual</p>
+      <div className="flex gap-2 mb-3">
+        <input
+          type="month"
+          className="input text-sm flex-1"
+          value={newMonths[q.id] || ''}
+          onChange={e => setNewMonths(nm => ({ ...nm, [q.id]: e.target.value }))}
+        />
+        <button
+          className="btn-secondary text-xs"
+          onClick={() => addBillingMonth(q, newMonths[q.id])}
+          disabled={!newMonths[q.id] || !!map[newMonths[q.id]]}
+        >
+          + Agregar Mes
+        </button>
+      </div>
+      {months.length === 0 ? (
+        <p className="text-xs text-gray-400 text-center py-2">Sin meses de facturación.</p>
+      ) : (
+        <div className="space-y-2">
+          {months.map(month => {
+            const entries = map[month];
+            const total = Object.values(entries).reduce((s, v) => s + (Number(v) || 0), 0);
+            return (
+              <div key={month} className="border border-gray-200 rounded overflow-hidden bg-white">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-gray-50 border-b border-gray-100">
+                  <span className="text-xs font-medium">{fmtMonth(month)}</span>
+                  <button
+                    className="text-red-400 hover:text-red-600 text-xs"
+                    onClick={() => setBillingMaps(bm => { const n = { ...bm, [q.id]: { ...bm[q.id] } }; delete n[q.id][month]; return n; })}
+                  >
+                    × Eliminar
+                  </button>
+                </div>
+                {Object.entries(entries).map(([mid, amt]) => (
+                  <div key={mid} className="flex items-center justify-between px-3 py-1.5 border-b border-gray-50 last:border-0">
+                    <span className="text-xs text-gray-600">
+                      {mid === '_' ? 'General' : (malls.find(m => m.id === Number(mid))?.name || `Mall #${mid}`)}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-gray-400">$</span>
+                      <input
+                        type="number" min="0" className="input py-0.5 text-right text-xs w-24"
+                        value={amt}
+                        onChange={e => setBillingMaps(bm => ({
+                          ...bm,
+                          [q.id]: { ...bm[q.id], [month]: { ...bm[q.id][month], [mid]: e.target.value } }
+                        }))}
+                      />
+                    </div>
+                  </div>
+                ))}
+                {Object.keys(entries).length > 1 && (
+                  <div className="flex justify-between px-3 py-1.5 bg-gray-50 text-xs font-medium border-t border-gray-100">
+                    <span>Total mes</span><span>${total.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <div className="flex justify-end pt-1">
+            <button
+              className="btn-primary text-xs py-1.5"
+              onClick={() => saveBilling(q)}
+              disabled={savingBillings[q.id]}
+            >
+              {savingBillings[q.id] ? 'Guardando...' : '💾 Guardar Facturación'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
