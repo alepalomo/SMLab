@@ -25,6 +25,7 @@ export default function GastosPage() {
 
   // Descarga reportes
   const [rango, setRango] = useState({ from: firstOfMonth(), to: today() });
+  const [ccReportOiId, setCcReportOiId] = useState('');
 
   // Forms
   const [odcForm, setOdcForm] = useState({ odcNumber: '', date: today(), oiId: '', companyId: '', amountGtq: '', description: '', quoteId: '' });
@@ -187,7 +188,9 @@ export default function GastosPage() {
         endpoint = '/expenses/report/caja-chica';
         filename = 'caja_chica_contable.csv';
       }
-      const res = await api.get(`${endpoint}?from=${rango.from}&to=${rango.to}`, { responseType: 'blob' });
+      const params = new URLSearchParams({ from: rango.from, to: rango.to });
+      if (format === 'pdf' && ccReportOiId) params.set('oiId', ccReportOiId);
+      const res = await api.get(`${endpoint}?${params}`, { responseType: 'blob' });
       const url = URL.createObjectURL(res.data);
       const link = document.createElement('a');
       link.href = url;
@@ -353,7 +356,7 @@ export default function GastosPage() {
             </form>
           </div>
 
-          <ReportDownloader rango={rango} setRango={setRango} onDownload={() => downloadReport('caja')} onDownloadPdf={() => downloadReport('caja', 'pdf')} label="Reporte Contable Caja Chica" />
+          <ReportDownloader rango={rango} setRango={setRango} onDownload={() => downloadReport('caja')} onDownloadPdf={() => downloadReport('caja', 'pdf')} label="Reporte Contable Caja Chica" ois={ois} oiId={ccReportOiId} setOiId={setCcReportOiId} />
         </div>
       )}
 
@@ -562,11 +565,11 @@ export default function GastosPage() {
   );
 }
 
-function ReportDownloader({ rango, setRango, onDownload, onDownloadPdf, label }) {
+function ReportDownloader({ rango, setRango, onDownload, onDownloadPdf, label, ois, oiId, setOiId }) {
   return (
     <div className="card p-5">
       <h3 className="font-medium text-gray-700 mb-3">⬇️ {label}</h3>
-      <div className="flex gap-3 items-end">
+      <div className="flex flex-wrap gap-3 items-end">
         <div>
           <label className="label">Desde</label>
           <input type="date" className="input" value={rango.from} onChange={e => setRango(r => ({ ...r, from: e.target.value }))} />
@@ -575,6 +578,15 @@ function ReportDownloader({ rango, setRango, onDownload, onDownloadPdf, label })
           <label className="label">Hasta</label>
           <input type="date" className="input" value={rango.to} onChange={e => setRango(r => ({ ...r, to: e.target.value }))} />
         </div>
+        {ois && setOiId && (
+          <div>
+            <label className="label">OI (solo para PDF)</label>
+            <select className="input" value={oiId} onChange={e => setOiId(e.target.value)}>
+              <option value="">Todas las OIs</option>
+              {ois.map(o => <option key={o.id} value={o.id}>{o.oiCode} — {o.oiName}</option>)}
+            </select>
+          </div>
+        )}
         <button className="btn-secondary" onClick={onDownload}>Descargar CSV</button>
         {onDownloadPdf && (
           <button className="btn-secondary" onClick={onDownloadPdf}>📄 Descargar PDF de Facturas</button>

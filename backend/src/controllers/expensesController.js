@@ -315,13 +315,14 @@ exports.deleteReceipt = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// GET /api/expenses/report/caja-chica-pdf?from=&to= — PDF con todas las facturas
+// GET /api/expenses/report/caja-chica-pdf?from=&to=&oiId= — PDF con todas las facturas
 exports.reportCajaChicaPdf = async (req, res, next) => {
   try {
     const { Op } = require('sequelize');
-    const { from, to } = req.query;
+    const { from, to, oiId } = req.query;
     const where = { category: 'CAJA_CHICA' };
     if (from && to) where.date = { [Op.between]: [from, to] };
+    if (oiId) where.oiId = oiId;
 
     const data = await Expense.findAll({
       where,
