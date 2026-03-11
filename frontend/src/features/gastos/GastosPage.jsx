@@ -27,6 +27,10 @@ export default function GastosPage() {
   const [rango, setRango] = useState({ from: firstOfMonth(), to: today() });
   const [ccReportOiId, setCcReportOiId] = useState('');
 
+  // Recientes (para editar fácilmente justo después de ingresar)
+  const [recentOdc, setRecentOdc] = useState([]);
+  const [recentCc, setRecentCc] = useState([]);
+
   // Forms
   const [odcForm, setOdcForm] = useState({ odcNumber: '', date: today(), oiId: '', companyId: '', amountGtq: '', description: '', quoteId: '' });
   const [ccForm, setCcForm] = useState({ date: today(), oiId: '', companyId: '', amountGtq: '', docNumber: '', textAdditional: '', payTo: '', quoteId: '' });
@@ -39,6 +43,17 @@ export default function GastosPage() {
   const [hostQuote, setHostQuote] = useState('');
   const [hostDesc, setHostDesc] = useState('');
   const [hostRows, setHostRows] = useState([{ desc: '', rate: 0, days: 1 }]);
+
+  const loadRecents = async () => {
+    try {
+      const [odc, cc] = await Promise.all([
+        api.get('/expenses?category=ODC&limit=5'),
+        api.get('/expenses?category=CAJA_CHICA&limit=5'),
+      ]);
+      setRecentOdc(odc.data);
+      setRecentCc(cc.data);
+    } catch (_) {}
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -66,6 +81,7 @@ export default function GastosPage() {
       }
     };
     load();
+    loadRecents();
   }, []);
 
   // Si no hay actividades activas, mostrar aviso pero igual permitir ver el historial
@@ -78,6 +94,7 @@ export default function GastosPage() {
       await api.post('/expenses/odc', { ...odcForm, amountGtq: Number(odcForm.amountGtq) });
       toast.success('ODC guardada');
       setOdcForm(f => ({ ...f, odcNumber: '', amountGtq: '', description: '' }));
+      loadRecents();
     } catch (err) { toast.error(getApiError(err)); }
     finally { setLoading(false); }
   };
@@ -95,6 +112,7 @@ export default function GastosPage() {
       toast.success('Caja Chica guardada');
       setCcForm(f => ({ ...f, amountGtq: '', docNumber: '', textAdditional: '', payTo: '' }));
       setCcReceiptFile(null);
+      loadRecents();
     } catch (err) { toast.error(getApiError(err)); }
     finally { setLoading(false); }
   };
@@ -160,6 +178,7 @@ export default function GastosPage() {
       toast.success('Gasto actualizado');
       setEditingExpense(null);
       loadHistorial();
+      loadRecents();
     } catch (err) { toast.error(getApiError(err)); }
     finally { setLoading(false); }
   };
@@ -171,6 +190,7 @@ export default function GastosPage() {
       await api.delete(`/expenses/${id}`);
       toast.success('Gasto eliminado');
       loadHistorial();
+      loadRecents();
     } catch (err) { toast.error(getApiError(err)); }
     finally { setLoading(false); }
   };
@@ -282,6 +302,9 @@ export default function GastosPage() {
             </form>
           </div>
 
+          {/* Últimos ODC ingresados */}
+          <RecentExpenses items={recentOdc} isPrivileged={isPrivileged} onEdit={startEdit} onDelete={deleteExpense} label="Últimos ODC ingresados" />
+
           {/* Descarga CSV ODC */}
           <ReportDownloader rango={rango} setRango={setRango} onDownload={() => downloadReport('odc')} label="Reporte ODC" />
         </div>
@@ -334,18 +357,22 @@ export default function GastosPage() {
                   <input className="input" value={ccForm.textAdditional} onChange={e => setCcForm(f => ({ ...f, textAdditional: e.target.value }))} />
                 </div>
                 <div className="col-span-3">
-                  <label className="label">📎 Imagen de Factura (opcional)</label>
+                  <label className="label">📎 Factura adjunta (opcional)</label>
                   {ccReceiptFile ? (
                     <div className="flex items-center gap-3 mt-1">
-                      <img src={URL.createObjectURL(ccReceiptFile)} alt="Factura" className="h-16 w-16 object-cover rounded border border-gray-200" />
+                      {ccReceiptFile.type === 'application/pdf' ? (
+                        <span className="text-3xl">📄</span>
+                      ) : (
+                        <img src={URL.createObjectURL(ccReceiptFile)} alt="Factura" className="h-16 w-16 object-cover rounded border border-gray-200" />
+                      )}
                       <span className="text-sm text-gray-600">{ccReceiptFile.name}</span>
                       <button type="button" className="text-red-500 text-xs hover:text-red-700" onClick={() => setCcReceiptFile(null)}>× Quitar</button>
                     </div>
                   ) : (
                     <label className="flex items-center gap-2 border border-dashed border-gray-300 rounded-lg p-3 cursor-pointer hover:border-brand-400 hover:bg-brand-50 transition-colors mt-1 w-fit">
                       <span className="text-lg">🧾</span>
-                      <span className="text-sm text-gray-500">Adjuntar factura (JPG, PNG, WEBP)</span>
-                      <input type="file" accept="image/*" className="hidden" onChange={e => setCcReceiptFile(e.target.files?.[0] || null)} />
+                      <span className="text-sm text-gray-500">Adjuntar factura (JPG, PNG, WEBP, PDF)</span>
+                      <input type="file" accept="image/*,.pdf" className="hidden" onChange={e => setCcReceiptFile(e.target.files?.[0] || null)} />
                     </label>
                   )}
                 </div>
@@ -355,6 +382,9 @@ export default function GastosPage() {
               </div>
             </form>
           </div>
+
+          {/* Últimos Caja Chica ingresados */}
+          <RecentExpenses items={recentCc} isPrivileged={isPrivileged} onEdit={startEdit} onDelete={deleteExpense} label="Últimos Caja Chica ingresados" />
 
           <ReportDownloader rango={rango} setRango={setRango} onDownload={() => downloadReport('caja')} onDownloadPdf={() => downloadReport('caja', 'pdf')} label="Reporte Contable Caja Chica" ois={ois} oiId={ccReportOiId} setOiId={setCcReportOiId} />
         </div>
@@ -561,6 +591,45 @@ export default function GastosPage() {
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+function RecentExpenses({ items, isPrivileged, onEdit, onDelete, label }) {
+  if (!items.length) return null;
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+        <h3 className="text-sm font-medium text-gray-600">🕒 {label}</h3>
+        <span className="text-xs text-gray-400">últimos 5</span>
+      </div>
+      <table className="w-full text-sm">
+        <thead className="bg-gray-50 text-gray-400 uppercase text-xs">
+          <tr>
+            <th className="px-3 py-2 text-left">Fecha</th>
+            <th className="px-3 py-2 text-left">Descripción</th>
+            <th className="px-3 py-2 text-right">Monto Q</th>
+            {isPrivileged && <th className="px-3 py-2" />}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {items.map(exp => (
+            <tr key={exp.id} className="hover:bg-gray-50">
+              <td className="px-3 py-2 text-gray-500 whitespace-nowrap">{exp.date}</td>
+              <td className="px-3 py-2 text-gray-700">{exp.description || exp.docNumber || '—'}</td>
+              <td className="px-3 py-2 text-right font-semibold">{exp.amountGtq?.toLocaleString('es-GT', { minimumFractionDigits: 2 })}</td>
+              {isPrivileged && (
+                <td className="px-3 py-2 text-right">
+                  <div className="flex gap-2 justify-end">
+                    <button className="btn-secondary text-xs py-1 px-2" onClick={() => onEdit(exp)}>✏️</button>
+                    <button className="btn-danger text-xs py-1 px-2" onClick={() => onDelete(exp.id)}>🗑️</button>
+                  </div>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

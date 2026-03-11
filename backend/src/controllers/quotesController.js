@@ -110,11 +110,14 @@ exports.update = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// DELETE /api/quotes/:id
+// DELETE /api/quotes/:id — solo BORRADOR
 exports.remove = async (req, res, next) => {
   try {
     const quote = await Quote.findByPk(req.params.id);
     if (!quote) return res.status(404).json({ error: 'Cotización no encontrada.' });
+    if (!['BORRADOR', 'PLANTILLA'].includes(quote.status)) {
+      return res.status(409).json({ error: 'Solo se pueden eliminar cotizaciones en BORRADOR o PLANTILLAs.' });
+    }
     await QuoteLine.destroy({ where: { quoteId: quote.id } });
     await quote.destroy();
     res.json({ message: 'Cotización eliminada.' });

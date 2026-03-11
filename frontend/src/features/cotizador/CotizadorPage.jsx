@@ -3,8 +3,11 @@ import toast from 'react-hot-toast';
 import api from '../../lib/api';
 import { fmtUSD, fmtGTQ, STATUS_LABELS, STATUS_COLORS, getApiError } from '../../lib/utils';
 import Modal from '../../components/Modal';
+import useAuthStore from '../auth/authStore';
 
 export default function CotizadorPage() {
+  const user = useAuthStore(s => s.user);
+  const isPrivileged = user?.role === 'ADMIN' || user?.role === 'AUTORIZADO';
   const [quotes, setQuotes] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [activityTypes, setActivityTypes] = useState([]);
@@ -124,6 +127,16 @@ export default function CotizadorPage() {
       load();
     } catch (err) { toast.error(getApiError(err)); }
     finally { setLoading(false); }
+  };
+
+  const deleteQuote = async (e, id) => {
+    e.stopPropagation();
+    if (!window.confirm('¿Eliminar este borrador? Esta acción no se puede deshacer.')) return;
+    try {
+      await api.delete(`/quotes/${id}`);
+      toast.success('Borrador eliminado');
+      load();
+    } catch (err) { toast.error(getApiError(err)); }
   };
 
   const saveAsTemplate = async () => {
@@ -408,9 +421,18 @@ export default function CotizadorPage() {
                     <p className="font-medium">{q.activityName}</p>
                     <p className="text-xs text-gray-400">{q.activityType?.name} · {q.mallIds?.length > 0 ? q.mallIds.map(id => malls.find(m => m.id === id)?.name).filter(Boolean).join(', ') : (q.mall?.name || 'Sin mall')} · {new Date(q.createdAt).toLocaleDateString('es-GT')}</p>
                   </div>
-                  <div className="text-right">
-                    <p className="font-semibold text-brand-600">{fmtUSD(q.totalCostUsd)}</p>
-                    <span className={`badge ${STATUS_COLORS[q.status]}`}>{STATUS_LABELS[q.status]}</span>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="font-semibold text-brand-600">{fmtUSD(q.totalCostUsd)}</p>
+                      <span className={`badge ${STATUS_COLORS[q.status]}`}>{STATUS_LABELS[q.status]}</span>
+                    </div>
+                    {isPrivileged && (
+                      <button
+                        className="btn-ghost text-red-400 hover:text-red-600 text-lg px-2 py-1"
+                        onClick={e => deleteQuote(e, q.id)}
+                        title="Eliminar borrador"
+                      >🗑️</button>
+                    )}
                   </div>
                 </div>
               ))}

@@ -21,7 +21,7 @@ const receiptUpload = multer({
   storage: receiptStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_, file, cb) => {
-    const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+    const allowed = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'];
     cb(null, allowed.includes(path.extname(file.originalname).toLowerCase()));
   },
 });
@@ -187,7 +187,7 @@ exports.deleteExpense = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// GET /api/expenses?category=ODC&from=2024-01-01&to=2024-12-31
+// GET /api/expenses?category=ODC&from=2024-01-01&to=2024-12-31&limit=10
 exports.list = async (req, res, next) => {
   try {
     const { Op } = require('sequelize');
@@ -204,7 +204,8 @@ exports.list = async (req, res, next) => {
         { model: Quote, as: 'quote', attributes: ['activityName'] },
         { model: Mall, as: 'mall', attributes: ['name'] },
       ],
-      order: [['date', 'DESC']],
+      order: [['date', 'DESC'], ['createdAt', 'DESC']],
+      limit: req.query.limit ? parseInt(req.query.limit) : undefined,
     });
     res.json(expenses);
   } catch (err) { next(err); }
@@ -368,9 +369,16 @@ exports.reportCajaChicaPdf = async (req, res, next) => {
         const imgPath = path.join(RECEIPTS_DIR, e.receiptImagePath);
         if (fs.existsSync(imgPath)) {
           doc.moveDown(1);
-          const pageW = doc.page.width - 80;
-          const maxH = doc.page.height - doc.y - 60;
-          doc.image(imgPath, { fit: [pageW, maxH], align: 'center' });
+          const ext = path.extname(e.receiptImagePath).toLowerCase();
+          if (ext === '.pdf') {
+            doc.fillColor('#555555').fontSize(9)
+              .text(`Factura adjunta en formato PDF: ${e.receiptImagePath}`, { align: 'center' });
+            doc.fillColor('#000000');
+          } else {
+            const pageW = doc.page.width - 80;
+            const maxH = doc.page.height - doc.y - 60;
+            doc.image(imgPath, { fit: [pageW, maxH], align: 'center' });
+          }
         }
       } else {
         doc.moveDown(1);

@@ -17,7 +17,8 @@ exports.financials = async (req, res, next) => {
       status: { [Op.in]: ['APROBADA', 'EJECUTADA', 'LIQUIDADA'] },
       createdAt: { [Op.between]: [start, end] },
     };
-    if (mallIds.length) salesWhere.mallId = { [Op.in]: mallIds };
+    // No filtramos por mallId en DB porque las cotizaciones multi-mall tienen
+    // mallId = primer mall; el filtro real se hace en JS usando el array mallIds
     if (typeIds.length) salesWhere.activityTypeId = { [Op.in]: typeIds };
     if (quoteIds.length) salesWhere.id = { [Op.in]: quoteIds };
 
@@ -29,17 +30,37 @@ exports.financials = async (req, res, next) => {
       ],
     });
 
-    const visibleIds = salesData.map(q => q.id);
+    // Filtrar por malls en JS: incluir si algún mallId del array coincide
+    const filteredSales = mallIds.length
+      ? salesData.filter(q => {
+          const qMalls = Array.isArray(q.mallIds) && q.mallIds.length > 0
+            ? q.mallIds
+            : (q.mallId ? [q.mallId] : []);
+          return qMalls.length === 0 || qMalls.some(id => mallIds.includes(id));
+        })
+      : salesData;
 
-    // Total venta: usa precio final acordado, si no hay usa sugerido m60 como proyección
-    const totalVentaUsd = salesData.reduce((s, q) =>
-      s + (q.finalSalePriceUsd != null ? q.finalSalePriceUsd : q.suggestedPriceUsdM60), 0);
-    const totalCostoPresupuestoUsd = salesData.reduce((s, q) => s + q.totalCostUsd, 0);
+    const visibleIds = filteredSales.map(q => q.id);
+
+    // Total venta: para cotizaciones multi-mall con billing schedule,
+    // atribuir solo la porción facturada a los malls del filtro
+    const totalVentaUsd = filteredSales.reduce((s, q) => {
+      if (mallIds.length && q.billingSchedule?.length) {
+        const billedForMalls = q.billingSchedule
+          .filter(e => !e.mallId || mallIds.includes(e.mallId))
+          .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+        return s + billedForMalls;
+      }
+      return s + (q.finalSalePriceUsd != null ? q.finalSalePriceUsd : q.suggestedPriceUsdM60);
+    }, 0);
+    const totalCostoPresupuestoUsd = filteredSales.reduce((s, q) => s + q.totalCostUsd, 0);
 
     // Gastos reales vinculados a esas cotizaciones
     let totalGastoRealUsd = 0;
     if (visibleIds.length) {
-      const gastos = await Expense.findAll({ where: { quoteId: { [Op.in]: visibleIds } } });
+      const expWhere = { quoteId: { [Op.in]: visibleIds } };
+      if (mallIds.length) expWhere.mallId = { [Op.in]: mallIds };
+      const gastos = await Expense.findAll({ where: expWhere });
       totalGastoRealUsd = gastos.reduce((s, e) => s + e.amountUsd, 0);
     }
 
@@ -54,7 +75,7 @@ exports.financials = async (req, res, next) => {
       utilidadRealUsd,
       margenRealPct,
       variacionPresupuesto,
-      actividades: salesData.length,
+      actividades: filteredSales.length,
     });
   } catch (err) { next(err); }
 };
