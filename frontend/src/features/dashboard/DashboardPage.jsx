@@ -1,10 +1,131 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import api from '../../lib/api';
 import { fmtUSD, fmtPct } from '../../lib/utils';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 
+// ── MultiSelect compacto con dropdown ────────────────────────────────────────
+function MultiSelect({ options, selected, onChange, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const toggle = id => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="input flex items-center justify-between gap-2 text-left w-full"
+      >
+        <span className={selected.length === 0 ? 'text-gray-400' : 'text-gray-800'}>
+          {selected.length === 0
+            ? placeholder
+            : selected.length === 1
+              ? options.find(o => o.id === selected[0])?.name
+              : `${selected.length} seleccionados`}
+        </span>
+        <span className="text-gray-400 text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          {options.map(o => (
+            <label key={o.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                className="accent-brand-600"
+                checked={selected.includes(o.id)}
+                onChange={() => toggle(o.id)}
+              />
+              {o.name}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Buscador de actividades específicas ──────────────────────────────────────
+function ActivitySearch({ selQuotes, onChange }) {
+  const [quotes, setQuotes] = useState([]);
+  const [search, setSearch] = useState('');
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    Promise.all([
+      api.get('/quotes?status=APROBADA'),
+      api.get('/quotes?status=LIQUIDADA'),
+    ]).then(([a, l]) => setQuotes([...a.data, ...l.data]));
+  }, []);
+
+  useEffect(() => {
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = quotes.filter(q =>
+    q.activityName.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const toggle = id => onChange(selQuotes.includes(id) ? selQuotes.filter(x => x !== id) : [...selQuotes, id]);
+  const removeOne = id => onChange(selQuotes.filter(x => x !== id));
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        className="input flex flex-wrap gap-1 min-h-[38px] cursor-text"
+        onClick={() => setOpen(true)}
+      >
+        {selQuotes.map(id => {
+          const q = quotes.find(x => x.id === id);
+          return q ? (
+            <span key={id} className="inline-flex items-center gap-1 bg-brand-100 text-brand-700 text-xs rounded px-1.5 py-0.5">
+              {q.activityName}
+              <button type="button" className="hover:text-brand-900" onClick={e => { e.stopPropagation(); removeOne(id); }}>×</button>
+            </span>
+          ) : null;
+        })}
+        <input
+          className="flex-1 min-w-[120px] outline-none text-sm bg-transparent"
+          placeholder={selQuotes.length === 0 ? 'Buscar actividad...' : ''}
+          value={search}
+          onChange={e => { setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+        />
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-30 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          {filtered.map(q => (
+            <label key={q.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+              <input
+                type="checkbox"
+                className="accent-brand-600"
+                checked={selQuotes.includes(q.id)}
+                onChange={() => toggle(q.id)}
+              />
+              <span className="flex-1">{q.activityName}</span>
+              <span className={`text-xs px-1.5 py-0.5 rounded-full ${q.status === 'APROBADA' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                {q.status === 'APROBADA' ? 'Activa' : 'Liquidada'}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Dashboard principal ───────────────────────────────────────────────────────
 export default function DashboardPage() {
   const currentYear = new Date().getFullYear();
   const [year, setYear] = useState(currentYear);
@@ -12,13 +133,13 @@ export default function DashboardPage() {
   const [types, setTypes] = useState([]);
   const [selMalls, setSelMalls] = useState([]);
   const [selTypes, setSelTypes] = useState([]);
+  const [selQuotes, setSelQuotes] = useState([]);
 
   const [financials, setFinancials] = useState(null);
   const [oiData, setOiData] = useState([]);
   const [billingData, setBillingData] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Cargar opciones de filtro
   useEffect(() => {
     api.get('/dashboard/filters').then(({ data }) => {
       setMalls(data.malls);
@@ -26,7 +147,6 @@ export default function DashboardPage() {
     });
   }, []);
 
-  // Cargar datos del dashboard
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -34,6 +154,7 @@ export default function DashboardPage() {
         const params = new URLSearchParams({ year });
         if (selMalls.length) params.set('mallIds', selMalls.join(','));
         if (selTypes.length) params.set('typeIds', selTypes.join(','));
+        if (selQuotes.length) params.set('quoteIds', selQuotes.join(','));
 
         const [fin, oi, billing] = await Promise.all([
           api.get(`/dashboard/financials?${params}`),
@@ -48,11 +169,9 @@ export default function DashboardPage() {
       }
     };
     fetchData();
-  }, [year, selMalls, selTypes]);
+  }, [year, selMalls, selTypes, selQuotes]);
 
-  const toggleFilter = (arr, setArr, id) => {
-    setArr(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
+  const toggleMall = id => setSelMalls(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const totalBudget = oiData.reduce((s, o) => s + o.budgetUsd, 0);
   const totalReal = oiData.reduce((s, o) => s + o.realUsd, 0);
@@ -64,6 +183,8 @@ export default function DashboardPage() {
     Ejecutado: Number(o.realUsd.toFixed(2)),
   }));
 
+  const hasFilters = selMalls.length > 0 || selTypes.length > 0 || selQuotes.length > 0;
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Dashboard Financiero</h1>
@@ -71,7 +192,7 @@ export default function DashboardPage() {
       {/* Filtros */}
       <div className="card p-5 space-y-4">
         <h2 className="font-semibold text-gray-700">Filtros de Visualización</h2>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-4 gap-4">
           <div>
             <label className="label">Año Fiscal</label>
             <input type="number" className="input" value={year} onChange={e => setYear(Number(e.target.value))} step="1" />
@@ -80,7 +201,7 @@ export default function DashboardPage() {
             <label className="label">Malls</label>
             <div className="flex flex-wrap gap-2 mt-1">
               {malls.map(m => (
-                <button key={m.id} onClick={() => toggleFilter(selMalls, setSelMalls, m.id)}
+                <button key={m.id} onClick={() => toggleMall(m.id)}
                   className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${selMalls.includes(m.id) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-300 hover:border-brand-400'}`}>
                   {m.name}
                 </button>
@@ -88,20 +209,22 @@ export default function DashboardPage() {
             </div>
           </div>
           <div>
-            <label className="label">Tipos de Actividad</label>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {types.map(t => (
-                <button key={t.id} onClick={() => toggleFilter(selTypes, setSelTypes, t.id)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${selTypes.includes(t.id) ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-300 hover:border-brand-400'}`}>
-                  {t.name}
-                </button>
-              ))}
-            </div>
+            <label className="label">Tipo de Actividad</label>
+            <MultiSelect
+              options={types}
+              selected={selTypes}
+              onChange={setSelTypes}
+              placeholder="Todos los tipos"
+            />
+          </div>
+          <div>
+            <label className="label">Actividad Específica</label>
+            <ActivitySearch selQuotes={selQuotes} onChange={setSelQuotes} />
           </div>
         </div>
-        {(selMalls.length > 0 || selTypes.length > 0) && (
-          <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => { setSelMalls([]); setSelTypes([]); }}>
-            ✕ Limpiar filtros
+        {hasFilters && (
+          <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => { setSelMalls([]); setSelTypes([]); setSelQuotes([]); }}>
+            ✕ Limpiar todos los filtros
           </button>
         )}
       </div>
@@ -142,7 +265,6 @@ export default function DashboardPage() {
         <div className="space-y-4">
           <h2 className="font-semibold text-gray-800">📊 Ejecución de Cuentas (OIs)</h2>
 
-          {/* KPIs globales */}
           <div className="grid grid-cols-4 gap-4">
             <KpiCard label="Presupuesto Anual" value={fmtUSD(totalBudget)} />
             <KpiCard label="Gasto Real" value={fmtUSD(totalReal)} />
@@ -150,7 +272,6 @@ export default function DashboardPage() {
             <KpiCard label="Disponible" value={fmtUSD(totalBudget - totalReal)} />
           </div>
 
-          {/* Barra de progreso global */}
           <div className="card px-5 py-3">
             <div className="flex justify-between text-xs text-gray-500 mb-1">
               <span>Ejecución global</span>
@@ -164,7 +285,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Gráfica */}
           <div className="card p-5">
             <h3 className="font-medium text-gray-700 mb-4">Comparativa por Cuenta (OI)</h3>
             <ResponsiveContainer width="100%" height={350}>
@@ -180,7 +300,6 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           </div>
 
-          {/* Tabla detalle */}
           <div className="card overflow-hidden">
             <div className="px-5 py-3 bg-gray-50 border-b border-gray-200">
               <h3 className="font-medium text-gray-700">Detalle por OI</h3>
